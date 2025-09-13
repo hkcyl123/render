@@ -25,32 +25,33 @@ Eigen::Matrix4f ModelView, Viewport, Perspective;
 Eigen::Vector3f model_tran(Eigen::Vector3f v, double angel) {
     double a = M_PI * angel / 180.0;
     Eigen::Matrix3f Ry;
-    Ry << std::cos(a), 0, std::sin(a), 0,1,0, -std::sin(a), 0, std::cos(a);
+    Ry << std::cos(a), 0, std::sin(a), 0, 1, 0, -std::sin(a), 0, std::cos(a);
     return Ry * v;
 }
 
+// 摄像机方向
 void lookat(const Eigen::Vector3f eye, const Eigen::Vector3f center, const Eigen::Vector3f up) {
-    Eigen::Vector3f n = (eye-center).normalized();
+    Eigen::Vector3f n = (eye - center).normalized();
     Eigen::Vector3f l = up.cross(n).normalized();
     Eigen::Vector3f m = n.cross(l).normalized();
     Eigen::Matrix4f model, view;
-    model << l.x(),l.y(),l.z(),0,m.x(),m.y(),m.z(),0, n.x(),n.y(),n.z(),0, 0,0,0,1;
-    view << 1,0,0,-center.x(), 0,1,0,-center.y(), 0,0,1,-center.z(), 0,0,0,1;
+    model << l.x(), l.y(), l.z(), 0, m.x(), m.y(), m.z(), 0, n.x(), n.y(), n.z(), 0, 0, 0, 0, 1;
+    view << 1, 0, 0, -center.x(), 0, 1, 0, -center.y(), 0, 0, 1, -center.z(), 0, 0, 0, 1;
     ModelView = model * view;
 }
 
 void viewport(const int x, const int y, const int w, const int h) {
-    Viewport << w/2., 0, 0, x+w/2., 0, h/2., 0, y+h/2., 0,0,1,0, 0,0,0,1;
+    Viewport << w / 2., 0, 0, x + w / 2., 0, h / 2., 0, y + h / 2., 0, 0, 1, 0, 0, 0, 0, 1;
 }
 
 // 透视变换
 void perspective(const double f) {
-    Perspective << 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0, -1/f,1;
-}
-Eigen::Vector3f perspective(Eigen::Vector3f v, double c) {
-    return v / (1-v.z()/c);
+    Perspective << 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, -1 / f, 1;
 }
 
+Eigen::Vector3f perspective(Eigen::Vector3f v, double c) {
+    return v / (1 - v.z() / c);
+}
 
 
 void draw_line(float x_1, float y_1, float x_2, float y_2, TGAImage &framebuffer, TGAColor color) {
@@ -95,29 +96,35 @@ bool in_triangle(float x, float y, float ax, float ay, float bx, float by, float
 
 void draw_triangle(Eigen::Vector4f a, Eigen::Vector4f b, Eigen::Vector4f c,
                    TGAImage &framebuffer, TGAImage &zbuffer, TGAColor color, AAType type) {
-
-    Eigen::Vector4f ndc[3]    = { a/a.w(), b/b.w(), c/c.w() };                // normalized device coordinates
+    Eigen::Vector4f ndc[3] = {a / a.w(), b / b.w(), c / c.w()}; // normalized device coordinates
     Eigen::Vector4f product_1 = Viewport * ndc[0];
     Eigen::Vector4f product_2 = Viewport * ndc[1];
     Eigen::Vector4f product_3 = Viewport * ndc[2];
     // Eigen::Vector2f screen[3] = { ().xy(), (Viewport*ndc[1]).xy(), (Viewport*ndc[2]).xy() }; // screen coordinates
-    Eigen::Vector2f screen[3] = {{product_1.x(), product_1.y()}, {product_2.x(), product_2.y()}, {product_3.x(), product_3.y()}};
+    Eigen::Vector2f screen[3] = {
+        {product_1.x(), product_1.y()}, {product_2.x(), product_2.y()}, {product_3.x(), product_3.y()}
+    };
 
-    Eigen::Matrix3f ABC ;
-    ABC << screen[0].x(), screen[0].y(), 1.,screen[1].x(), screen[1].y(), 1.,screen[2].x(), screen[2].y(), 1.;
+    Eigen::Matrix3f ABC;
+    ABC << screen[0].x(), screen[0].y(), 1., screen[1].x(), screen[1].y(), 1., screen[2].x(), screen[2].y(), 1.;
     // if (ABC.det() < 1) return; // backface culling + discarding triangles that cover less than a pixel
 
 
     auto [bbminx,bbmaxx] = std::minmax({screen[0].x(), screen[1].x(), screen[2].x()}); // bounding box for the triangle
-    auto [bbminy,bbmaxy] = std::minmax({screen[0].y(), screen[1].y(), screen[2].y()}); // defined by its top left and bottom right corners
+    auto [bbminy,bbmaxy] = std::minmax({screen[0].y(), screen[1].y(), screen[2].y()});
+    // defined by its top left and bottom right corners
 
     // unsigned char z = static_cast<unsigned char>(az);
 
-    for (int x=std::max<int>(bbminx, 0); x<=std::min<int>(bbmaxx, framebuffer.width()-1); x++) { // clip the bounding box by the screen
-        for (int y=std::max<int>(bbminy, 0); y<=std::min<int>(bbmaxy, framebuffer.height()-1); y++) {
-            Eigen::Vector3f bc = ABC.inverse().transpose() * Eigen::Vector3f{static_cast<float>(x), static_cast<float>(y), 1.}; // barycentric coordinates of {x,y} w.r.t the triangle
-            if (bc.x()<0 || bc.y()<0 || bc.z()<0) continue;
-            Eigen::Vector3f zb = { ndc[0].z(), ndc[1].z(), ndc[2].z() };// negative barycentric coordinate => the pixel is outside the triangle
+    for (int x = std::max<int>(bbminx, 0); x <= std::min<int>(bbmaxx, framebuffer.width() - 1); x++) {
+        // clip the bounding box by the screen
+        for (int y = std::max<int>(bbminy, 0); y <= std::min<int>(bbmaxy, framebuffer.height() - 1); y++) {
+            Eigen::Vector3f bc = ABC.inverse().transpose() * Eigen::Vector3f{
+                                     static_cast<float>(x), static_cast<float>(y), 1.
+                                 }; // barycentric coordinates of {x,y} w.r.t the triangle
+            if (bc.x() < 0 || bc.y() < 0 || bc.z() < 0) continue;
+            Eigen::Vector3f zb = {ndc[0].z(), ndc[1].z(), ndc[2].z()};
+            // negative barycentric coordinate => the pixel is outside the triangle
             float z = bc.dot(zb);
             if (z <= zbuffer.get(x, y)[0]) continue;
             // zbuffer.set(x, y, {z});
@@ -147,8 +154,7 @@ void draw_triangle(Eigen::Vector4f a, Eigen::Vector4f b, Eigen::Vector4f c,
     // }
 }
 
-Eigen::Vector4f to_vec4(const Eigen::Vector3f& v3, float w = 1.0f)
-{
+Eigen::Vector4f to_vec4(const Eigen::Vector3f &v3, float w = 1.0f) {
     return Eigen::Vector4f(v3.x(), v3.y(), v3.z(), w);
 }
 
@@ -156,18 +162,18 @@ Eigen::Vector4f to_vec4(const Eigen::Vector3f& v3, float w = 1.0f)
 int main(int argc, char **argv) {
     Model model("/Users/huangkaicheng/Desktop/github/render/models/spot/spot_triangulated_good.obj");
 
+
     TGAImage framebuffer(width, height, TGAImage::RGB);
     TGAImage zbuffer(width, height, TGAImage::GRAYSCALE);
 
-    constexpr int width  = 800;    // output image size
-    constexpr int height = 800;
-    Eigen::Vector3f    eye{-1,0,2}; // camera position
-    Eigen::Vector3f center{0,0,0};  // camera direction
-    Eigen::Vector3f     up{0,1,0};  // camera up vector
 
-    lookat(eye, center, up);                              // build the ModelView   matrix
-    perspective((eye-center).norm());                        // build the Perspective matrix
-    viewport(width/16, height/16, width*7/8, height*7/8); // build the Viewport    matrix
+    Eigen::Vector3f eye{-1, 0, 2}; // camera position
+    Eigen::Vector3f center{0, 0, 0}; // camera direction
+    Eigen::Vector3f up{0, 1, 0}; // camera up vector
+
+    lookat(eye, center, up); // build the ModelView   matrix
+    perspective((eye - center).norm()); // build the Perspective matrix
+    viewport(width / 16, height / 16, width * 7 / 8, height * 7 / 8); // build the Viewport    matrix
 
 
     double angel = 90.0;
@@ -175,7 +181,6 @@ int main(int argc, char **argv) {
     double zFar = 100.0;
 
     for (int face = 0; face < model.nfaces(); face++) {
-
         Eigen::Vector4f a = Perspective * ModelView * to_vec4(model.vert(face, 0));
         Eigen::Vector4f b = Perspective * ModelView * to_vec4(model.vert(face, 0));
         Eigen::Vector4f c = Perspective * ModelView * to_vec4(model.vert(face, 0));
