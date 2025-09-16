@@ -6,11 +6,11 @@
 #include "model.h"
 #include "tgaimage.h"
 
-constexpr TGAColor white = {255, 255, 255, 255}; // attention, BGRA order
-constexpr TGAColor green = {0, 255, 0, 255};
-constexpr TGAColor red = {0, 0, 255, 255};
-constexpr TGAColor blue = {255, 128, 64, 255};
-constexpr TGAColor yellow = {0, 200, 255, 255};
+Eigen::Vector4i white = {255, 255, 255, 255}; // attention, BGRA order
+Eigen::Vector4i green = {0, 255, 0, 255};
+Eigen::Vector4i red = {0, 0, 255, 255};
+Eigen::Vector4i blue = {255, 128, 64, 255};
+Eigen::Vector4i yellow = {0, 200, 255, 255};
 
 
 constexpr int width = 800;
@@ -23,6 +23,14 @@ inline double DEG2RAD(double deg) { return deg * MY_PI / 180; }
 enum AAType {
     NONE, SSAA, MSAA, FXAA, TAA
 };
+
+TGAColor get_TGAColor(Eigen::Vector4i color) {
+    TGAColor tgacolor = {static_cast<unsigned char>(color[0]),
+        static_cast<unsigned char>(color[1]),
+        static_cast<unsigned char>(color[2]),
+        static_cast<unsigned char>(color[3])};
+    return tgacolor;
+}
 
 /**
  * 视图变换
@@ -38,9 +46,9 @@ Eigen::Matrix4f get_view_matrix(Eigen::Vector3f eye_pos, Eigen::Vector3f look_at
 
     Eigen::Matrix4f view;
     view << right.x(), right.y(), right.z(), 0,
-    cameraUp.x(), cameraUp.y(), cameraUp.z(), 0,
-    -look_at.x(), -look_at.y(), -look_at.z(), 0,
-    0, 0, 0, 1;
+            cameraUp.x(), cameraUp.y(), cameraUp.z(), 0,
+            -look_at.x(), -look_at.y(), -look_at.z(), 0,
+            0, 0, 0, 1;
 
 
     Eigen::Matrix4f translate;
@@ -154,16 +162,10 @@ bool in_triangle(double lambda_1, double lambda_2, double lambda_3) {
     return true;
 }
 
-void set_pixel(std::vector<Eigen::Vector3f> &framebuffer, const Eigen::Vector2i &point, const Eigen::Vector3f &color)
-{
-    //old index: auto ind = point.y() + point.x() * width;
-    int ind = (height-1-point.y())*width + point.x();
-    framebuffer[ind] = color;
-}
-
 
 void draw_triangle(float ax, float ay, float az, float bx, float by, float bz, float cx, float cy, float cz,
-                   std::vector<Eigen::Vector3f> &framebuffer, std::vector<Eigen::Vector3f> &zbuffer, TGAColor color, AAType type) {
+                   TGAImage &framebuffer, TGAImage &zbuffer, Eigen::Vector4i color,
+                   AAType type) {
     float x_max, x_min, y_max, y_min;
     x_max = std::max(ax, bx);
     x_max = std::max(x_max, cx);
@@ -176,17 +178,17 @@ void draw_triangle(float ax, float ay, float az, float bx, float by, float bz, f
     // unsigned char z = static_cast<unsigned char>(az);
     for (int y = y_min; y <= y_max; y++) {
         for (int x = x_min; x <= x_max; x++) {
+            auto [lambda_1, lambda_2, lambda_3] = computer_lambda(x, y, ax, ay, bx, by, cx, cy);
+
+            if (in_triangle(lambda_1, lambda_2, lambda_3)) {
+                unsigned char z = static_cast<unsigned char>(lambda_1 * az + lambda_2 * bz + lambda_3 * cz);
+                if (z <= zbuffer.get(x, y)[0]) continue;
+                zbuffer.set(x, y, {z});
+                framebuffer.set(x, y, get_TGAColor(color));
+
+            }
 
 
-            // auto [lambda_1, lambda_2, lambda_3] = computer_lambda(x, y, ax, ay, bx, by, cx, cy);
-            // if (in_triangle(lambda_1, lambda_2, lambda_3)) {
-            //     unsigned char z = static_cast<unsigned char>(lambda_1 * az + lambda_2 * bz + lambda_2 * cz);
-            //     if (z <= zbuffer.get(x, y)[0]) continue;
-            //     // unsigned char z = static_cast<unsigned char>(1 * az + 0 * bz + 0 * cz);
-            //     zbuffer.set(x, y, {z});
-            //     framebuffer.set(x, y, color);
-            //     set_pixel(framebuffer, {})
-            // }
         }
     }
 }
@@ -197,9 +199,9 @@ auto to_vec4(const Eigen::Vector3f &v3, float w = 1.0f) {
 
 Eigen::Vector4f MVP_tr(Eigen::Vector3f v, float angle, Eigen::Vector3f eye_pos, float eye_fov, float aspect_ratio,
                        float zNear, float zFar) {
-    Eigen::Vector3f s = {300., 300., -300.};
-    Eigen::Vector3f t = {0, 0, 0};
-    Eigen::Vector3f rot_vec = {0, 1., 0};
+    Eigen::Vector3f s = {100, 100, 100};
+    Eigen::Vector3f t = {-100, -100, 0};
+    Eigen::Vector3f rot_vec = {0, 0, 1};
 
     Eigen::Vector3f look_at = {0, 0, 0};
     Eigen::Vector3f look_at_t = {0, 1, 0};
@@ -222,7 +224,7 @@ int main(int argc, char **argv) {
     // 定义摄像机z轴距离
     Eigen::Vector3f eye_pos = {0, 0, 3.0};
     // 定义初始角度
-    float angle = 0.0;
+    float angle = 180.0;
     // 视角度数
     float eye_fov = 45.0;
     // 长宽比
@@ -232,41 +234,28 @@ int main(int argc, char **argv) {
     // 最远距离
     float zFar = 100.0;
 
-    std::vector<Eigen::Vector3f> framebuffer, zbuffer;
 
-    framebuffer.resize(width * height);
-    zbuffer.resize(width * height);
-
-    // TGAImage framebuffer(width, height, TGAImage::RGB);
-    // TGAImage zbuffer(width, height, TGAImage::GRAYSCALE);
+    TGAImage framebuffer(width, height, TGAImage::RGB);
+    TGAImage zbuffer(width, height, TGAImage::GRAYSCALE);
 
     for (int face = 0; face < model.nfaces(); face++) {
+
         Eigen::Vector4f a = MVP_tr(model.vert(face, 0), angle, eye_pos, eye_fov, aspect_ratio, zNear, zFar);
         Eigen::Vector4f b = MVP_tr(model.vert(face, 1), angle, eye_pos, eye_fov, aspect_ratio, zNear, zFar);
         Eigen::Vector4f c = MVP_tr(model.vert(face, 2), angle, eye_pos, eye_fov, aspect_ratio, zNear, zFar);
 
-        std::cout << a.x(), a.y(), a.z();
-        std::cout << b.x(), b.y(), b.z();
-        std::cout << c.x(), c.y(), c.z();
 
-        // draw_line(a.x(), a.y(), b.x(), b.y(), framebuffer, yellow);
-        // draw_line(a.x(), a.y(), c.x(), c.y(), framebuffer, yellow);
-        // draw_line(b.x(), b.y(), c.x(), c.y(), framebuffer, yellow);
+        // draw_line(a.x(), a.y(), b.x(), b.y(), framebuffer, get_TGAColor(yellow));
+        // draw_line(a.x(), a.y(), c.x(), c.y(), framebuffer, get_TGAColor(yellow));
+        // draw_line(b.x(), b.y(), c.x(), c.y(), framebuffer, get_TGAColor(yellow));
 
         draw_triangle(a.x(), a.y(), a.z(), b.x(), b.y(), b.z(), c.x(), c.y(), c.z(), framebuffer, zbuffer, yellow,
-                      NONE);
+        NONE);
     }
 
 
-    // framebuffer.write_tga_file("framebuffer.tga");
+    framebuffer.write_tga_file("framebuffer.tga");
+    zbuffer.write_tga_file("zbuffer.tga");
 
-    cv::Mat image(width, height, CV_32FC3, framebuffer.data());
-
-    image.convertTo(image, CV_8UC3, 1.0f);
-    cv::cvtColor(image, image, cv::COLOR_RGB2BGR);
-
-    cv::imshow("image", image);
-    cv::imwrite(filename, image);
-    // key = cv::waitKey(0);
     return 0;
 }
